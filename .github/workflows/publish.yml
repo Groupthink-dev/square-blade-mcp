@@ -8,7 +8,7 @@ on:
 jobs:
   publish:
     name: Build and publish to PyPI
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     permissions:
       id-token: write  # Trusted publishing
     steps:
