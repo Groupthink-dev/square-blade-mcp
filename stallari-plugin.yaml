@@ -1,13 +1,15 @@
 name: square-blade-mcp
-version: "0.1.0"
-description: "Square Payments API operations — payments, refunds, customers, cards, locations, orders, catalog, inventory, disputes, webhooks. Token-efficient with pipe-delimited output, field selection, and human-readable money formatting. PCI-safe card output."
+version: "0.2.0"
+description: "Square MCP — payments-v1 (payments, refunds, customers, cards, locations, orders, catalog, inventory, disputes, webhooks) + billing-v1 (subscriptions, plans, invoices). Token-efficient with pipe-delimited output, field selection, human-readable money. PCI-safe card output."
 author: groupthink-dev
 license: MIT
 tier: certified
 author_type: first-party
 readiness: beta
 homepage: https://github.com/Groupthink-dev/square-blade-mcp
-contract: payments-v1
+contract:
+  - payments-v1
+  - billing-v1
 
 services:
   payments:
@@ -59,20 +61,79 @@ services:
     webhook_event_types: square_webhook_event_types
     webhook_verify: square_verify_webhook
 
-# Operations declared in payments-v1 but not yet implemented in this server.
-# Surfaced here so the catalog can advertise the gap. Tracked in README roadmap.
+  # ----------------------------------------------------------------------
+  # billing-v1 mappings (Square Subscriptions + Invoices APIs).
+  # Square's catalog covers products/prices/discounts/plans;
+  # the Subscriptions API drives recurring billing; payments + refunds
+  # surface as billing transactions and adjustments. Honest gaps are
+  # listed in not_supported below.
+  # ----------------------------------------------------------------------
+  billing:
+    # Required
+    products: square_catalog
+    product: square_catalog_object
+    prices: square_catalog
+    customers: square_customers
+    subscriptions: square_subscription_list
+    transactions: square_payments
+    # Recommended
+    customer: square_customer
+    subscription: square_subscription
+    transaction: square_payment
+    invoice: square_invoice
+    adjustments: square_refunds
+    discounts: square_catalog
+    # Optional
+    payment_methods: square_cards
+    verify_webhook: square_verify_webhook
+    # Gated
+    create_customer: square_create_customer
+    update_subscription: square_update_subscription
+    cancel_subscription: square_cancel_subscription
+    create_transaction: square_create_payment
+    create_adjustment: square_create_refund
+    # Square-specific extensions (not in canonical billing-v1 op set,
+    # but useful aliases for callers that map plans/invoices through this server):
+    subscription_list: square_subscription_list
+    subscription_get: square_subscription
+    subscription_create: square_create_subscription
+    subscription_pause: square_pause_subscription
+    subscription_resume: square_resume_subscription
+    plan_list: square_subscription_plans
+    plan_get: square_subscription_plan
+    plan_create: square_create_subscription_plan
+    invoice_list: square_invoice_list
+    invoice_get: square_invoice
+    invoice_create: square_create_invoice
+    invoice_send: square_send_invoice
+    invoice_cancel: square_cancel_invoice
+
+# Operations declared in the contracts that Square does not support
+# in this server. Required ops in this list are honest gaps — discovery
+# must filter Square out when these ops are demanded by an operator.
 not_supported:
-  - card_delete         # use card_disable (soft delete)
-  - payment_void        # gated, deferred to v0.2.0
-  - refund_unlinked     # gated, deferred to v0.2.0
-  - inventory_adjust    # gated, deferred to v0.2.0
+  # payments-v1 gaps (carried forward from 0.1.0)
+  - card_delete                # use card_disable (soft delete)
+  - payment_void               # gated, deferred
+  - refund_unlinked            # gated, deferred
+  - inventory_adjust           # gated, deferred
+  # billing-v1 gaps
+  - credit_balance             # Square has no equivalent customer credit ledger API
+  - events                     # use webhook_event_types via payments-v1
+  - notifications              # webhook subscriptions only — no operator-facing notification list/inspect
+  - reports                    # Square Reporting API is gated and outside this server's scope
+  - preview_transaction        # Square has no off-the-shelf transaction preview endpoint
+  - ip_addresses               # Square does not publish webhook source IP allowlists
+  - create_discount            # Discounts live in the Catalog upsert path (not exposed as a typed billing op here)
+  - replay_notification        # Square has no notification replay; redeliver via webhook configuration in the dashboard
+  - simulate                   # Square has no billing simulation endpoint
 
 setup:
-  auth_model: api_key   # PAT for v0.1.0; OAuth in v0.2.0
+  auth_model: api_key   # PAT for v0.2.0; OAuth in v0.3.0
   complexity: moderate
   icon: "square.fill"
-  product: "Square Payments"
-  blurb: "Connect to Square for in-person and online payments — POS, e-commerce, refunds, customer cards on file."
+  product: "Square"
+  blurb: "Connect to Square for in-person and online payments, plus subscription billing and invoices."
   fields:
     - key: SQUARE_ACCESS_TOKEN
       label: "Access Token (PAT)"
@@ -136,8 +197,15 @@ requires:
   stallari: ">=0.60"
 
 conformance:
-  required: "12/12"
-  recommended: "8/8"
-  optional: "10/10"
-  gated: "2/6"
-  last_tested: "2026-04-27"
+  payments-v1:
+    required: "12/12"
+    recommended: "8/8"
+    optional: "10/10"
+    gated: "2/6"
+    last_tested: "2026-04-28"
+  billing-v1:
+    required: "6/6"        # products, product, prices, customers, subscriptions, transactions
+    recommended: "6/8"     # missing credit_balance, events
+    optional: "2/6"        # payment_methods, verify_webhook (notifications, reports, preview_transaction, ip_addresses not supported)
+    gated: "5/8"           # create_customer, update_subscription, cancel_subscription, create_transaction, create_adjustment (create_discount, replay_notification, simulate not supported)
+    last_tested: "2026-04-28"

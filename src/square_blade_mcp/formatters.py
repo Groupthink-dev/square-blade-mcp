@@ -648,6 +648,168 @@ def format_webhook_verification(result: dict[str, Any]) -> str:
     return f"Invalid webhook: {result.get('error', 'verification failed')}"
 
 
+def format_subscription_list(response: dict[str, Any], limit: int = DEFAULT_LIMIT) -> str:
+    """Format subscription list (search response)."""
+    items = _items(response, "subscriptions")
+    if not items:
+        return "No subscriptions found."
+    shown = items[:limit]
+    lines: list[str] = []
+    for s in shown:
+        parts = [
+            s.get("id", "?"),
+            s.get("status", "?"),
+            f"plan={s.get('plan_variation_id') or s.get('plan_id') or '?'}",
+        ]
+        if cust := s.get("customer_id"):
+            parts.append(f"cust={cust}")
+        if loc := s.get("location_id"):
+            parts.append(f"loc={loc}")
+        if start := s.get("start_date"):
+            parts.append(f"start={start}")
+        if charged := s.get("charged_through_date"):
+            parts.append(f"thru={charged}")
+        lines.append(" | ".join(parts))
+    if hint := format_pagination(response, len(shown)):
+        lines.append(hint)
+    return "\n".join(lines)
+
+
+def format_subscription_detail(data: dict[str, Any], fields: str | None = None) -> str:
+    """Format subscription detail."""
+    d = select_fields(data, fields)
+    lines: list[str] = []
+    lines.append(f"ID: {d.get('id', '?')}")
+    lines.append(f"Status: {d.get('status', '?')}")
+    if plan := d.get("plan_variation_id") or d.get("plan_id"):
+        lines.append(f"Plan: {plan}")
+    if cust := d.get("customer_id"):
+        lines.append(f"Customer: {cust}")
+    if loc := d.get("location_id"):
+        lines.append(f"Location: {loc}")
+    if start := d.get("start_date"):
+        lines.append(f"Start: {start}")
+    if charged := d.get("charged_through_date"):
+        lines.append(f"Charged Through: {charged}")
+    if canceled := d.get("canceled_date"):
+        lines.append(f"Canceled: {canceled}")
+    if invoice := d.get("invoice_ids"):
+        lines.append(f"Invoices: {len(invoice)}")
+    if version := d.get("version"):
+        lines.append(f"Version: {version}")
+    if d.get("timezone"):
+        lines.append(f"Timezone: {d['timezone']}")
+    actions = d.get("actions", []) or []
+    if actions:
+        lines.append(f"Pending Actions ({len(actions)}):")
+        for a in actions[:5]:
+            atype = a.get("type", "?")
+            eff = a.get("effective_date") or a.get("effective_time") or "?"
+            lines.append(f"  {atype} | {eff}")
+    if created := d.get("created_at"):
+        lines.append(f"Created: {format_datetime(created)}")
+    return "\n".join(lines)
+
+
+def format_subscription_plan_list(response: dict[str, Any], limit: int = DEFAULT_LIMIT) -> str:
+    """Format subscription plan list (Catalog list filtered by SUBSCRIPTION_PLAN)."""
+    items = _items(response, "objects")
+    if not items:
+        return "No subscription plans found."
+    shown = items[:limit]
+    lines: list[str] = []
+    for obj in shown:
+        otype = obj.get("type", "?")
+        data = obj.get("subscription_plan_data") or obj.get("subscription_plan_variation_data") or {}
+        parts = [obj.get("id", "?"), otype]
+        if name := data.get("name"):
+            parts.append(name)
+        phases = data.get("phases") or data.get("subscription_phases") or []
+        if phases:
+            parts.append(f"{len(phases)} phases")
+        if obj.get("is_deleted"):
+            parts.append("deleted")
+        lines.append(" | ".join(parts))
+    if hint := format_pagination(response, len(shown)):
+        lines.append(hint)
+    return "\n".join(lines)
+
+
+def format_invoice_list(response: dict[str, Any], limit: int = DEFAULT_LIMIT) -> str:
+    """Format invoice list."""
+    items = _items(response, "invoices")
+    if not items:
+        return "No invoices found."
+    shown = items[:limit]
+    lines: list[str] = []
+    for inv in shown:
+        parts = [
+            inv.get("id", "?"),
+            inv.get("status", "?"),
+            inv.get("invoice_number") or "(no number)",
+        ]
+        if cust_req := inv.get("primary_recipient", {}).get("customer_id") if inv.get("primary_recipient") else None:
+            parts.append(f"cust={cust_req}")
+        if order := inv.get("order_id"):
+            parts.append(f"order={order}")
+        order_request = inv.get("payment_requests") or []
+        if order_request:
+            first_amount = order_request[0].get("computed_amount_money") or order_request[0].get(
+                "fixed_amount_requested_money"
+            )
+            if first_amount:
+                parts.append(format_square_money(first_amount))
+        if created := inv.get("created_at"):
+            parts.append(format_datetime(created))
+        lines.append(" | ".join(parts))
+    if hint := format_pagination(response, len(shown)):
+        lines.append(hint)
+    return "\n".join(lines)
+
+
+def format_invoice_detail(data: dict[str, Any], fields: str | None = None) -> str:
+    """Format invoice detail."""
+    d = select_fields(data, fields)
+    lines: list[str] = []
+    lines.append(f"ID: {d.get('id', '?')}")
+    lines.append(f"Status: {d.get('status', '?')}")
+    if num := d.get("invoice_number"):
+        lines.append(f"Invoice Number: {num}")
+    if title := d.get("title"):
+        lines.append(f"Title: {title}")
+    if order := d.get("order_id"):
+        lines.append(f"Order: {order}")
+    if loc := d.get("location_id"):
+        lines.append(f"Location: {loc}")
+    if recipient := d.get("primary_recipient"):
+        cust = recipient.get("customer_id") or "?"
+        email = recipient.get("email_address")
+        line = f"Recipient: {cust}"
+        if email:
+            line += f" <{email}>"
+        lines.append(line)
+    pay_reqs = d.get("payment_requests") or []
+    if pay_reqs:
+        lines.append(f"Payment Requests ({len(pay_reqs)}):")
+        for pr in pay_reqs[:5]:
+            req_type = pr.get("request_type", "?")
+            amt = pr.get("computed_amount_money") or pr.get("fixed_amount_requested_money")
+            money = format_square_money(amt) if amt else "?"
+            due = pr.get("due_date") or "?"
+            lines.append(f"  {req_type} | {money} | due {due}")
+    if d.get("public_url"):
+        lines.append(f"Public URL: {d['public_url']}")
+    if d.get("delivery_method"):
+        lines.append(f"Delivery: {d['delivery_method']}")
+    if version := d.get("version"):
+        lines.append(f"Version: {version}")
+    if created := d.get("created_at"):
+        lines.append(f"Created: {format_datetime(created)}")
+    if updated := d.get("updated_at"):
+        lines.append(f"Updated: {format_datetime(updated)}")
+    return "\n".join(lines)
+
+
 def format_info(env: str, api_version: str, write_enabled: bool) -> str:
     """Format the ``square_info`` tool output."""
     lines = [

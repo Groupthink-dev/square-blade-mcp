@@ -151,7 +151,7 @@ class SquareClient:
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Square-Version": SQUARE_API_VERSION,
-                "User-Agent": "square-blade-mcp/0.1.0",
+                "User-Agent": "square-blade-mcp/0.2.0",
             },
             timeout=30.0,
         )
@@ -515,6 +515,149 @@ class SquareClient:
     async def get_dispute(self, dispute_id: str) -> dict[str, Any]:
         """Fetch a dispute by id."""
         return await self._get(f"/disputes/{dispute_id}")
+
+    # ==================================================================
+    # Subscriptions (billing-v1)
+    # ==================================================================
+
+    async def search_subscriptions(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Search subscriptions (filter by location/customer/plan/status)."""
+        return await self._post("/subscriptions/search", body)
+
+    async def get_subscription(
+        self,
+        subscription_id: str,
+        include: str | None = None,
+    ) -> dict[str, Any]:
+        """Get a subscription by id (optional include=actions)."""
+        params: dict[str, Any] = {}
+        if include:
+            params["include"] = include
+        return await self._get(f"/subscriptions/{subscription_id}", params or None)
+
+    async def create_subscription(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Create a subscription. Idempotency key auto-injected."""
+        if "idempotency_key" not in body:
+            body = {**body, "idempotency_key": self._idempotency_key()}
+        return await self._post("/subscriptions", body)
+
+    async def update_subscription(
+        self,
+        subscription_id: str,
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update a subscription (PUT)."""
+        return await self._put(f"/subscriptions/{subscription_id}", body)
+
+    async def cancel_subscription(self, subscription_id: str) -> dict[str, Any]:
+        """Cancel a subscription at the end of the current billing period."""
+        return await self._post(f"/subscriptions/{subscription_id}/cancel")
+
+    async def pause_subscription(
+        self,
+        subscription_id: str,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Schedule a PAUSE action on a subscription."""
+        action: dict[str, Any] = {"type": "PAUSE"}
+        if body:
+            action.update(body)
+        payload: dict[str, Any] = {
+            "action": action,
+            "idempotency_key": self._idempotency_key(),
+        }
+        return await self._post(f"/subscriptions/{subscription_id}/actions", payload)
+
+    async def resume_subscription(
+        self,
+        subscription_id: str,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Schedule a RESUME action on a subscription."""
+        action: dict[str, Any] = {"type": "RESUME"}
+        if body:
+            action.update(body)
+        payload: dict[str, Any] = {
+            "action": action,
+            "idempotency_key": self._idempotency_key(),
+        }
+        return await self._post(f"/subscriptions/{subscription_id}/actions", payload)
+
+    # ------------------------------------------------------------------
+    # Subscription plans (Catalog API: SUBSCRIPTION_PLAN / SUBSCRIPTION_PLAN_VARIATION)
+    # ------------------------------------------------------------------
+
+    async def list_subscription_plans(
+        self,
+        cursor: str | None = None,
+        catalog_version: int | None = None,
+    ) -> dict[str, Any]:
+        """List subscription plans via the Catalog API."""
+        return await self.list_catalog(
+            types="SUBSCRIPTION_PLAN",
+            catalog_version=catalog_version,
+            cursor=cursor,
+        )
+
+    async def get_subscription_plan(
+        self,
+        plan_id: str,
+        include_related_objects: bool | None = None,
+    ) -> dict[str, Any]:
+        """Get a subscription plan via the Catalog API."""
+        return await self.get_catalog_object(
+            plan_id,
+            include_related_objects=include_related_objects,
+        )
+
+    async def create_subscription_plan(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Create a subscription plan via the Catalog upsert endpoint.
+
+        Body shape::
+
+            {
+                "object": {
+                    "type": "SUBSCRIPTION_PLAN",
+                    "id": "#new-plan",
+                    "subscription_plan_data": {
+                        "name": "Pro Plan",
+                        "phases": [...]
+                    }
+                }
+            }
+        """
+        if "idempotency_key" not in body:
+            body = {**body, "idempotency_key": self._idempotency_key()}
+        return await self._post("/catalog/object", body)
+
+    # ==================================================================
+    # Invoices (billing-v1)
+    # ==================================================================
+
+    async def search_invoices(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Search invoices (location_ids required in query.filter)."""
+        return await self._post("/invoices/search", body)
+
+    async def get_invoice(self, invoice_id: str) -> dict[str, Any]:
+        """Get an invoice by id."""
+        return await self._get(f"/invoices/{invoice_id}")
+
+    async def create_invoice(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Create an invoice in DRAFT state. Idempotency key auto-injected."""
+        if "idempotency_key" not in body:
+            body = {**body, "idempotency_key": self._idempotency_key()}
+        return await self._post("/invoices", body)
+
+    async def publish_invoice(self, invoice_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Publish (send) an invoice. Body must carry ``version`` and
+        ``idempotency_key``."""
+        if "idempotency_key" not in body:
+            body = {**body, "idempotency_key": self._idempotency_key()}
+        return await self._post(f"/invoices/{invoice_id}/publish", body)
+
+    async def cancel_invoice(self, invoice_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Cancel an invoice. Body must carry ``version``."""
+        return await self._post(f"/invoices/{invoice_id}/cancel", body)
 
     # ==================================================================
     # Webhook subscriptions + event types
