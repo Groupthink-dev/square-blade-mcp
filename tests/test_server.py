@@ -8,13 +8,18 @@ import pytest
 
 import square_blade_mcp.server as server_module
 from square_blade_mcp.server import (
+    square_cancel_invoice,
     square_cancel_payment,
+    square_cancel_subscription,
     square_card,
     square_cards,
     square_create_card,
     square_create_customer,
+    square_create_invoice,
     square_create_payment,
     square_create_refund,
+    square_create_subscription,
+    square_create_subscription_plan,
     square_create_webhook_subscription,
     square_customer,
     square_customers,
@@ -24,16 +29,26 @@ from square_blade_mcp.server import (
     square_disputes,
     square_info,
     square_inventory,
+    square_invoice,
+    square_invoice_list,
     square_location,
     square_locations,
     square_order,
+    square_pause_subscription,
     square_payment,
     square_payments,
     square_refund,
     square_refunds,
+    square_resume_subscription,
     square_search_customers,
     square_search_orders,
+    square_send_invoice,
+    square_subscription,
+    square_subscription_list,
+    square_subscription_plan,
+    square_subscription_plans,
     square_update_customer,
+    square_update_subscription,
     square_verify_webhook,
     square_webhook_event_types,
     square_webhook_subscriptions,
@@ -42,10 +57,13 @@ from tests.conftest import (
     SAMPLE_CARD,
     SAMPLE_CUSTOMER,
     SAMPLE_DISPUTE,
+    SAMPLE_INVOICE,
     SAMPLE_LOCATION,
     SAMPLE_ORDER,
     SAMPLE_PAYMENT,
     SAMPLE_REFUND,
+    SAMPLE_SUBSCRIPTION,
+    SAMPLE_SUBSCRIPTION_PLAN,
     SAMPLE_WEBHOOK_SUB,
     make_list_response,
 )
@@ -304,3 +322,145 @@ class TestWebhooks:
             notification_url="https://example.com/webhook",
         )
         assert "Verified" in result
+
+
+class TestSubscriptions:
+    @pytest.mark.asyncio
+    async def test_list(self, mock_client: AsyncMock) -> None:
+        mock_client.search_subscriptions.return_value = make_list_response([SAMPLE_SUBSCRIPTION], "subscriptions")
+        out = await square_subscription_list(location_id="L1A2B3C4D5")
+        assert "sub_xyz" in out
+
+    @pytest.mark.asyncio
+    async def test_list_status_filter(self, mock_client: AsyncMock) -> None:
+        canceled = {**SAMPLE_SUBSCRIPTION, "status": "CANCELED"}
+        mock_client.search_subscriptions.return_value = make_list_response(
+            [SAMPLE_SUBSCRIPTION, canceled], "subscriptions"
+        )
+        out = await square_subscription_list(statuses="ACTIVE")
+        assert "ACTIVE" in out
+        assert out.count("sub_xyz") == 1
+
+    @pytest.mark.asyncio
+    async def test_get(self, mock_client: AsyncMock) -> None:
+        mock_client.get_subscription.return_value = {"subscription": SAMPLE_SUBSCRIPTION}
+        assert "sub_xyz" in await square_subscription("sub_xyz")
+
+    @pytest.mark.asyncio
+    async def test_create_blocked(self, mock_client: AsyncMock) -> None:
+        result = await square_create_subscription(
+            location_id="L1A2B3C4D5", customer_id="cust_abc", plan_variation_id="pv"
+        )
+        assert "disabled" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_create(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.create_subscription.return_value = {"subscription": SAMPLE_SUBSCRIPTION}
+        result = await square_create_subscription(
+            location_id="L1A2B3C4D5", customer_id="cust_abc", plan_variation_id="pv_pro"
+        )
+        assert "sub_xyz" in result
+
+    @pytest.mark.asyncio
+    async def test_update(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.update_subscription.return_value = {"subscription": SAMPLE_SUBSCRIPTION}
+        result = await square_update_subscription("sub_xyz", subscription='{"version": 7}')
+        assert "sub_xyz" in result
+
+    @pytest.mark.asyncio
+    async def test_cancel_requires_confirm(self, mock_client: AsyncMock, write_env: None) -> None:
+        result = await square_cancel_subscription("sub_xyz", confirm=False)
+        assert "confirm=true" in result
+
+    @pytest.mark.asyncio
+    async def test_cancel(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.cancel_subscription.return_value = {"subscription": SAMPLE_SUBSCRIPTION}
+        result = await square_cancel_subscription("sub_xyz", confirm=True)
+        assert "ID: sub_xyz" in result
+
+    @pytest.mark.asyncio
+    async def test_pause_requires_confirm(self, mock_client: AsyncMock, write_env: None) -> None:
+        result = await square_pause_subscription("sub_xyz", confirm=False)
+        assert "confirm=true" in result
+
+    @pytest.mark.asyncio
+    async def test_pause(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.pause_subscription.return_value = {"actions": [{"type": "PAUSE"}]}
+        result = await square_pause_subscription("sub_xyz", confirm=True)
+        assert "PAUSE" in result
+
+    @pytest.mark.asyncio
+    async def test_resume(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.resume_subscription.return_value = {"actions": [{"type": "RESUME"}]}
+        result = await square_resume_subscription("sub_xyz", confirm=True)
+        assert "RESUME" in result
+
+
+class TestSubscriptionPlans:
+    @pytest.mark.asyncio
+    async def test_list(self, mock_client: AsyncMock) -> None:
+        mock_client.list_subscription_plans.return_value = {"objects": [SAMPLE_SUBSCRIPTION_PLAN]}
+        out = await square_subscription_plans()
+        assert "plan_pro" in out
+
+    @pytest.mark.asyncio
+    async def test_get(self, mock_client: AsyncMock) -> None:
+        mock_client.get_subscription_plan.return_value = {"object": SAMPLE_SUBSCRIPTION_PLAN}
+        out = await square_subscription_plan("plan_pro")
+        assert "Pro Plan" in out
+
+    @pytest.mark.asyncio
+    async def test_create(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.create_subscription_plan.return_value = {"object": SAMPLE_SUBSCRIPTION_PLAN}
+        out = await square_create_subscription_plan(
+            name="Pro Plan",
+            phases='[{"cadence":"MONTHLY","recurring_price_money":{"amount":2900,"currency":"USD"}}]',
+        )
+        assert "plan_pro" in out
+
+
+class TestInvoices:
+    @pytest.mark.asyncio
+    async def test_list(self, mock_client: AsyncMock) -> None:
+        mock_client.search_invoices.return_value = make_list_response([SAMPLE_INVOICE], "invoices")
+        out = await square_invoice_list(location_ids="L1A2B3C4D5")
+        assert "inv_1" in out
+
+    @pytest.mark.asyncio
+    async def test_get(self, mock_client: AsyncMock) -> None:
+        mock_client.get_invoice.return_value = {"invoice": SAMPLE_INVOICE}
+        out = await square_invoice("inv_1")
+        assert "INV-001" in out
+
+    @pytest.mark.asyncio
+    async def test_create_blocked(self, mock_client: AsyncMock) -> None:
+        out = await square_create_invoice(invoice='{"order_id":"ord_x"}')
+        assert "disabled" in out.lower()
+
+    @pytest.mark.asyncio
+    async def test_create(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.create_invoice.return_value = {"invoice": SAMPLE_INVOICE}
+        out = await square_create_invoice(invoice='{"order_id":"ord_inv_1"}')
+        assert "inv_1" in out
+
+    @pytest.mark.asyncio
+    async def test_send_requires_confirm(self, mock_client: AsyncMock, write_env: None) -> None:
+        out = await square_send_invoice("inv_1", version=0, confirm=False)
+        assert "confirm=true" in out
+
+    @pytest.mark.asyncio
+    async def test_send(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.publish_invoice.return_value = {"invoice": SAMPLE_INVOICE}
+        out = await square_send_invoice("inv_1", version=0, confirm=True)
+        assert "inv_1" in out
+
+    @pytest.mark.asyncio
+    async def test_cancel_requires_confirm(self, mock_client: AsyncMock, write_env: None) -> None:
+        out = await square_cancel_invoice("inv_1", version=1, confirm=False)
+        assert "confirm=true" in out
+
+    @pytest.mark.asyncio
+    async def test_cancel(self, mock_client: AsyncMock, write_env: None) -> None:
+        mock_client.cancel_invoice.return_value = {"invoice": SAMPLE_INVOICE}
+        out = await square_cancel_invoice("inv_1", version=1, confirm=True)
+        assert "inv_1" in out

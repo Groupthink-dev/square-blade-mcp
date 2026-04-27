@@ -16,6 +16,8 @@ from square_blade_mcp.formatters import (
     format_event_type_list,
     format_info,
     format_inventory_counts,
+    format_invoice_detail,
+    format_invoice_list,
     format_location_detail,
     format_location_list,
     format_order_detail,
@@ -25,6 +27,9 @@ from square_blade_mcp.formatters import (
     format_payment_list,
     format_refund_detail,
     format_refund_list,
+    format_subscription_detail,
+    format_subscription_list,
+    format_subscription_plan_list,
     format_webhook_subscription_detail,
     format_webhook_subscription_list,
     format_webhook_verification,
@@ -34,10 +39,13 @@ from tests.conftest import (
     SAMPLE_CARD,
     SAMPLE_CUSTOMER,
     SAMPLE_DISPUTE,
+    SAMPLE_INVOICE,
     SAMPLE_LOCATION,
     SAMPLE_ORDER,
     SAMPLE_PAYMENT,
     SAMPLE_REFUND,
+    SAMPLE_SUBSCRIPTION,
+    SAMPLE_SUBSCRIPTION_PLAN,
     SAMPLE_WEBHOOK_SUB,
     make_list_response,
 )
@@ -293,3 +301,69 @@ class TestInfo:
         assert "sandbox" in out
         assert "2024-12-18" in out
         assert "disabled" in out
+
+
+class TestSubscriptionFormatters:
+    def test_list_renders(self) -> None:
+        response = {"subscriptions": [SAMPLE_SUBSCRIPTION], "cursor": "next"}
+        out = format_subscription_list(response, limit=5)
+        assert "sub_xyz" in out
+        assert "ACTIVE" in out
+        assert "plan=plan_var_pro" in out
+        assert "more" in out  # pagination hint
+
+    def test_list_empty(self) -> None:
+        assert "No subscriptions" in format_subscription_list({"subscriptions": []})
+
+    def test_detail_renders(self) -> None:
+        out = format_subscription_detail(SAMPLE_SUBSCRIPTION)
+        assert "ID: sub_xyz" in out
+        assert "Status: ACTIVE" in out
+        assert "Plan: plan_var_pro" in out
+        assert "Customer: cust_abc" in out
+        assert "Invoices: 2" in out
+        assert "PAUSE" in out  # action listed
+
+    def test_detail_field_select(self) -> None:
+        out = format_subscription_detail(SAMPLE_SUBSCRIPTION, fields="status")
+        assert "Status: ACTIVE" in out
+        assert "Customer:" not in out
+
+    def test_plan_list_renders(self) -> None:
+        response = {"objects": [SAMPLE_SUBSCRIPTION_PLAN]}
+        out = format_subscription_plan_list(response)
+        assert "plan_pro" in out
+        assert "Pro Plan" in out
+        assert "1 phases" in out
+
+    def test_plan_list_empty(self) -> None:
+        assert "No subscription plans" in format_subscription_plan_list({"objects": []})
+
+
+class TestInvoiceFormatters:
+    def test_list_renders(self) -> None:
+        response = {"invoices": [SAMPLE_INVOICE]}
+        out = format_invoice_list(response)
+        assert "inv_1" in out
+        assert "DRAFT" in out
+        assert "INV-001" in out
+        assert "$29.00 USD" in out
+
+    def test_list_empty(self) -> None:
+        assert "No invoices" in format_invoice_list({"invoices": []})
+
+    def test_detail_renders(self) -> None:
+        out = format_invoice_detail(SAMPLE_INVOICE)
+        assert "ID: inv_1" in out
+        assert "Status: DRAFT" in out
+        assert "Invoice Number: INV-001" in out
+        assert "April Subscription" in out
+        assert "Recipient: cust_abc <alice@example.com>" in out
+        assert "BALANCE" in out
+        assert "$29.00 USD" in out
+        assert "Public URL:" in out
+
+    def test_detail_field_select(self) -> None:
+        out = format_invoice_detail(SAMPLE_INVOICE, fields="status")
+        assert "Status: DRAFT" in out
+        assert "Invoice Number" not in out

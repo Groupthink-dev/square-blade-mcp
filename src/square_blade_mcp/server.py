@@ -29,6 +29,8 @@ from square_blade_mcp.formatters import (
     format_event_type_list,
     format_info,
     format_inventory_counts,
+    format_invoice_detail,
+    format_invoice_list,
     format_location_detail,
     format_location_list,
     format_order_detail,
@@ -37,6 +39,9 @@ from square_blade_mcp.formatters import (
     format_payment_list,
     format_refund_detail,
     format_refund_list,
+    format_subscription_detail,
+    format_subscription_list,
+    format_subscription_plan_list,
     format_webhook_subscription_detail,
     format_webhook_subscription_list,
     format_webhook_verification,
@@ -961,6 +966,395 @@ async def square_verify_webhook(
             notification_url=notification_url,
         )
         return format_webhook_verification(result)
+    except SquareError as e:
+        return _error(e)
+
+
+# ===========================================================================
+# Subscriptions (billing-v1)
+# ===========================================================================
+
+
+@mcp.tool
+async def square_subscription_list(
+    location_id: Annotated[str | None, Field(description="Filter by location ID")] = None,
+    customer_ids: Annotated[str | None, Field(description="Comma-separated customer IDs to include")] = None,
+    plan_ids: Annotated[str | None, Field(description="Comma-separated subscription plan or variation IDs")] = None,
+    statuses: Annotated[
+        str | None, Field(description="Comma-separated statuses (ACTIVE, CANCELED, PAUSED, DEACTIVATED, PENDING)")
+    ] = None,
+    sort_field: Annotated[str | None, Field(description="DEFAULT or CREATED_AT")] = None,
+    sort_order: Annotated[str | None, Field(description="ASC or DESC")] = None,
+    limit: Annotated[int, Field(description="Max results (default 20)")] = DEFAULT_LIMIT,
+    cursor: Annotated[str | None, Field(description="Pagination cursor")] = None,
+) -> str:
+    """Search subscriptions with filters and sort."""
+    try:
+        client = await _get_client()
+        filt: dict[str, Any] = {}
+        if location_id:
+            filt["location_ids"] = [location_id]
+        if customer_ids:
+            filt["customer_ids"] = [s.strip() for s in customer_ids.split(",") if s.strip()]
+        if plan_ids:
+            filt["plan_ids"] = [s.strip() for s in plan_ids.split(",") if s.strip()]
+        if statuses:
+            filt["source_names"] = None  # placeholder; not supported by Square
+        body: dict[str, Any] = {"limit": limit}
+        query: dict[str, Any] = {}
+        if filt:
+            query["filter"] = {k: v for k, v in filt.items() if v}
+        if statuses:
+            query.setdefault("filter", {})
+        if sort_field or sort_order:
+            sort: dict[str, Any] = {}
+            if sort_field:
+                sort["field"] = sort_field
+            if sort_order:
+                sort["order"] = sort_order
+            query["sort"] = sort
+        if query:
+            body["query"] = query
+        if cursor:
+            body["cursor"] = cursor
+        result = await client.search_subscriptions(body)
+        # Square returns subscriptions; filter client-side by status if requested
+        if statuses:
+            wanted = {s.strip().upper() for s in statuses.split(",") if s.strip()}
+            subs = result.get("subscriptions", []) or []
+            result = {**result, "subscriptions": [s for s in subs if s.get("status", "").upper() in wanted]}
+        return format_subscription_list(result, limit)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_subscription(
+    subscription_id: Annotated[str, Field(description="Subscription ID")],
+    include: Annotated[str | None, Field(description="Optional: 'actions' to include pending actions")] = None,
+    fields: Annotated[str | None, Field(description="Comma-separated fields to return")] = None,
+) -> str:
+    """Get subscription detail."""
+    try:
+        client = await _get_client()
+        result = await client.get_subscription(subscription_id, include=include)
+        return format_subscription_detail(result.get("subscription", {}), fields)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_create_subscription(
+    location_id: Annotated[str, Field(description="Location ID")],
+    customer_id: Annotated[str, Field(description="Customer ID")],
+    plan_variation_id: Annotated[str, Field(description="Subscription plan variation ID (Catalog)")],
+    start_date: Annotated[str | None, Field(description="ISO 8601 date (YYYY-MM-DD); default today")] = None,
+    card_id: Annotated[str | None, Field(description="Card-on-file ID to charge")] = None,
+    timezone: Annotated[str | None, Field(description="IANA tz, e.g. America/Los_Angeles")] = None,
+    source_name: Annotated[str | None, Field(description="Free-form source name")] = None,
+    idempotency_key: Annotated[str | None, Field(description="Caller idempotency key")] = None,
+) -> str:
+    """Create a subscription. Requires SQUARE_WRITE_ENABLED=true."""
+    if err := require_write():
+        return err
+    try:
+        client = await _get_client()
+        body: dict[str, Any] = {
+            "location_id": location_id,
+            "customer_id": customer_id,
+            "plan_variation_id": plan_variation_id,
+        }
+        for k, v in {
+            "start_date": start_date,
+            "card_id": card_id,
+            "timezone": timezone,
+        }.items():
+            if v is not None:
+                body[k] = v
+        if source_name:
+            body["source"] = {"name": source_name}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+        result = await client.create_subscription(body)
+        return format_subscription_detail(result.get("subscription", {}))
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_update_subscription(
+    subscription_id: Annotated[str, Field(description="Subscription ID")],
+    subscription: Annotated[str, Field(description="Subscription patch as JSON object")],
+) -> str:
+    """Update a subscription (line items, plan_variation_id, billing anchor). Gated."""
+    if err := require_write():
+        return err
+    try:
+        client = await _get_client()
+        body: dict[str, Any] = {"subscription": _parse_json(subscription, "subscription")}
+        result = await client.update_subscription(subscription_id, body)
+        return format_subscription_detail(result.get("subscription", {}))
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_cancel_subscription(
+    subscription_id: Annotated[str, Field(description="Subscription ID")],
+    confirm: Annotated[bool, Field(description="Must be true; cancellation persists at period end")] = False,
+) -> str:
+    """Cancel a subscription at end of current period. Gated: confirm=true required."""
+    if err := require_write():
+        return err
+    if err := require_confirm(confirm, "cancel_subscription"):
+        return err
+    try:
+        client = await _get_client()
+        result = await client.cancel_subscription(subscription_id)
+        return format_subscription_detail(result.get("subscription", {}))
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_pause_subscription(
+    subscription_id: Annotated[str, Field(description="Subscription ID")],
+    pause_effective_date: Annotated[str | None, Field(description="YYYY-MM-DD; default current period end")] = None,
+    pause_cycle_duration: Annotated[
+        int | None, Field(description="Number of cycles to pause (omit = indefinite)")
+    ] = None,
+    pause_reason: Annotated[str | None, Field(description="Operator-supplied reason")] = None,
+    confirm: Annotated[bool, Field(description="Must be true; pause halts billing")] = False,
+) -> str:
+    """Schedule a PAUSE action on a subscription. Gated: confirm=true required."""
+    if err := require_write():
+        return err
+    if err := require_confirm(confirm, "pause_subscription"):
+        return err
+    try:
+        client = await _get_client()
+        extras: dict[str, Any] = {}
+        for k, v in {
+            "effective_date": pause_effective_date,
+            "pause_cycle_duration": pause_cycle_duration,
+            "pause_reason": pause_reason,
+        }.items():
+            if v is not None:
+                extras[k] = v
+        result = await client.pause_subscription(subscription_id, extras or None)
+        actions = result.get("actions", []) or []
+        return f"Scheduled PAUSE action ({len(actions)} pending)"
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_resume_subscription(
+    subscription_id: Annotated[str, Field(description="Subscription ID")],
+    resume_effective_date: Annotated[str | None, Field(description="YYYY-MM-DD; default immediate")] = None,
+    resume_change_timing: Annotated[str | None, Field(description="IMMEDIATE or END_OF_BILLING_CYCLE")] = None,
+    confirm: Annotated[bool, Field(description="Must be true; resume re-enables billing")] = False,
+) -> str:
+    """Schedule a RESUME action on a paused subscription. Gated: confirm=true required."""
+    if err := require_write():
+        return err
+    if err := require_confirm(confirm, "resume_subscription"):
+        return err
+    try:
+        client = await _get_client()
+        extras: dict[str, Any] = {}
+        for k, v in {
+            "effective_date": resume_effective_date,
+            "resume_change_timing": resume_change_timing,
+        }.items():
+            if v is not None:
+                extras[k] = v
+        result = await client.resume_subscription(subscription_id, extras or None)
+        actions = result.get("actions", []) or []
+        return f"Scheduled RESUME action ({len(actions)} pending)"
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_subscription_plans(
+    cursor: Annotated[str | None, Field(description="Pagination cursor")] = None,
+    catalog_version: Annotated[int | None, Field(description="Specific catalog version")] = None,
+    limit: Annotated[int, Field(description="Display limit")] = DEFAULT_LIMIT,
+) -> str:
+    """List subscription plans (Catalog API, type=SUBSCRIPTION_PLAN)."""
+    try:
+        client = await _get_client()
+        result = await client.list_subscription_plans(cursor=cursor, catalog_version=catalog_version)
+        return format_subscription_plan_list(result, limit)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_subscription_plan(
+    plan_id: Annotated[str, Field(description="Subscription plan catalog object ID")],
+    include_related_objects: Annotated[bool | None, Field(description="Include related variations/items")] = None,
+    fields: Annotated[str | None, Field(description="Comma-separated fields to return")] = None,
+) -> str:
+    """Get a subscription plan (Catalog object)."""
+    try:
+        client = await _get_client()
+        result = await client.get_subscription_plan(plan_id, include_related_objects=include_related_objects)
+        return format_catalog_detail(result, fields)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_create_subscription_plan(
+    name: Annotated[str, Field(description="Plan display name")],
+    phases: Annotated[str, Field(description="Plan phases array as JSON")],
+    plan_id: Annotated[str | None, Field(description="Client-supplied # ID; default '#new-plan'")] = None,
+    idempotency_key: Annotated[str | None, Field(description="Caller idempotency key")] = None,
+) -> str:
+    """Create a subscription plan via Catalog upsert. Gated."""
+    if err := require_write():
+        return err
+    try:
+        client = await _get_client()
+        new_id = plan_id or "#new-plan"
+        body: dict[str, Any] = {
+            "object": {
+                "type": "SUBSCRIPTION_PLAN",
+                "id": new_id,
+                "subscription_plan_data": {
+                    "name": name,
+                    "phases": _parse_json(phases, "phases"),
+                },
+            }
+        }
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+        result = await client.create_subscription_plan(body)
+        return format_catalog_detail(result)
+    except SquareError as e:
+        return _error(e)
+
+
+# ===========================================================================
+# Invoices (billing-v1)
+# ===========================================================================
+
+
+@mcp.tool
+async def square_invoice_list(
+    location_ids: Annotated[str, Field(description="Comma-separated location IDs (required by Square)")],
+    customer_ids: Annotated[str | None, Field(description="Comma-separated customer IDs")] = None,
+    sort_field: Annotated[str | None, Field(description="INVOICE_SORT_DATE")] = None,
+    sort_order: Annotated[str | None, Field(description="ASC or DESC")] = None,
+    limit: Annotated[int, Field(description="Max results (default 20)")] = DEFAULT_LIMIT,
+    cursor: Annotated[str | None, Field(description="Pagination cursor")] = None,
+) -> str:
+    """Search invoices across one or more locations."""
+    try:
+        client = await _get_client()
+        filt: dict[str, Any] = {
+            "location_ids": [s.strip() for s in location_ids.split(",") if s.strip()],
+        }
+        if customer_ids:
+            filt["customer_ids"] = [s.strip() for s in customer_ids.split(",") if s.strip()]
+        query: dict[str, Any] = {"filter": filt}
+        if sort_field or sort_order:
+            sort: dict[str, Any] = {}
+            if sort_field:
+                sort["field"] = sort_field
+            if sort_order:
+                sort["order"] = sort_order
+            query["sort"] = sort
+        body: dict[str, Any] = {"query": query, "limit": limit}
+        if cursor:
+            body["cursor"] = cursor
+        result = await client.search_invoices(body)
+        return format_invoice_list(result, limit)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_invoice(
+    invoice_id: Annotated[str, Field(description="Invoice ID")],
+    fields: Annotated[str | None, Field(description="Comma-separated fields to return")] = None,
+) -> str:
+    """Get invoice detail."""
+    try:
+        client = await _get_client()
+        result = await client.get_invoice(invoice_id)
+        return format_invoice_detail(result.get("invoice", {}), fields)
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_create_invoice(
+    invoice: Annotated[
+        str,
+        Field(
+            description=(
+                "Invoice object as JSON. Must include order_id, primary_recipient.customer_id, payment_requests."
+            )
+        ),
+    ],
+    idempotency_key: Annotated[str | None, Field(description="Caller idempotency key")] = None,
+) -> str:
+    """Create an invoice in DRAFT state. Requires write enabled."""
+    if err := require_write():
+        return err
+    try:
+        client = await _get_client()
+        body: dict[str, Any] = {"invoice": _parse_json(invoice, "invoice")}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+        result = await client.create_invoice(body)
+        return format_invoice_detail(result.get("invoice", {}))
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_send_invoice(
+    invoice_id: Annotated[str, Field(description="Invoice ID")],
+    version: Annotated[int, Field(description="Optimistic concurrency version of the invoice")],
+    idempotency_key: Annotated[str | None, Field(description="Caller idempotency key")] = None,
+    confirm: Annotated[bool, Field(description="Must be true; sending notifies the customer")] = False,
+) -> str:
+    """Publish (send) an invoice. Gated: confirm=true required."""
+    if err := require_write():
+        return err
+    if err := require_confirm(confirm, "send_invoice"):
+        return err
+    try:
+        client = await _get_client()
+        body: dict[str, Any] = {"version": version}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+        result = await client.publish_invoice(invoice_id, body)
+        return format_invoice_detail(result.get("invoice", {}))
+    except SquareError as e:
+        return _error(e)
+
+
+@mcp.tool
+async def square_cancel_invoice(
+    invoice_id: Annotated[str, Field(description="Invoice ID")],
+    version: Annotated[int, Field(description="Optimistic concurrency version of the invoice")],
+    confirm: Annotated[bool, Field(description="Must be true; cancellation is irreversible")] = False,
+) -> str:
+    """Cancel an invoice. Gated: confirm=true required."""
+    if err := require_write():
+        return err
+    if err := require_confirm(confirm, "cancel_invoice"):
+        return err
+    try:
+        client = await _get_client()
+        body: dict[str, Any] = {"version": version}
+        result = await client.cancel_invoice(invoice_id, body)
+        return format_invoice_detail(result.get("invoice", {}))
     except SquareError as e:
         return _error(e)
 

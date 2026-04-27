@@ -269,6 +269,167 @@ class TestResourceMethods:
             assert kwargs["params"]["include_disabled"] == "false"
 
 
+class TestSubscriptionsClient:
+    @pytest.mark.asyncio
+    async def test_search_subscriptions(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(200, json={"subscriptions": []}, request=httpx.Request("POST", "https://test"))
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.search_subscriptions({"limit": 5})
+            args, _ = mock_req.call_args
+            assert args[0] == "POST"
+            assert "/v2/subscriptions/search" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_get_subscription_with_include(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"subscription": {"id": "sub_xyz"}}, request=httpx.Request("GET", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.get_subscription("sub_xyz", include="actions")
+            args, kwargs = mock_req.call_args
+            assert "/v2/subscriptions/sub_xyz" in args[1]
+            assert kwargs["params"]["include"] == "actions"
+
+    @pytest.mark.asyncio
+    async def test_create_subscription_auto_idempotency(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"subscription": {"id": "sub_x"}}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.create_subscription({"location_id": "L1", "customer_id": "c1", "plan_variation_id": "pv"})
+            _, kwargs = mock_req.call_args
+            assert "idempotency_key" in kwargs["json"]
+
+    @pytest.mark.asyncio
+    async def test_update_subscription_uses_put(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"subscription": {"id": "sub_x"}}, request=httpx.Request("PUT", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.update_subscription("sub_x", {"subscription": {"price_override_money": None}})
+            args, _ = mock_req.call_args
+            assert args[0] == "PUT"
+            assert "/v2/subscriptions/sub_x" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_cancel_subscription(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"subscription": {"id": "sub_x"}}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.cancel_subscription("sub_x")
+            args, _ = mock_req.call_args
+            assert args[0] == "POST"
+            assert "/v2/subscriptions/sub_x/cancel" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_pause_subscription_action(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"actions": [{"type": "PAUSE"}]}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.pause_subscription("sub_x", {"effective_date": "2026-05-01"})
+            args, kwargs = mock_req.call_args
+            assert "/v2/subscriptions/sub_x/actions" in args[1]
+            assert kwargs["json"]["action"]["type"] == "PAUSE"
+            assert kwargs["json"]["action"]["effective_date"] == "2026-05-01"
+            assert "idempotency_key" in kwargs["json"]
+
+    @pytest.mark.asyncio
+    async def test_resume_subscription_action(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"actions": [{"type": "RESUME"}]}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.resume_subscription("sub_x")
+            _, kwargs = mock_req.call_args
+            assert kwargs["json"]["action"]["type"] == "RESUME"
+
+    @pytest.mark.asyncio
+    async def test_list_subscription_plans_uses_catalog(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(200, json={"objects": []}, request=httpx.Request("GET", "https://test"))
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.list_subscription_plans()
+            args, kwargs = mock_req.call_args
+            assert "/v2/catalog/list" in args[1]
+            assert kwargs["params"]["types"] == "SUBSCRIPTION_PLAN"
+
+    @pytest.mark.asyncio
+    async def test_create_subscription_plan_auto_idempotency(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200,
+            json={"catalog_object": {"id": "plan_x", "type": "SUBSCRIPTION_PLAN"}},
+            request=httpx.Request("POST", "https://test"),
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.create_subscription_plan(
+                {
+                    "object": {
+                        "type": "SUBSCRIPTION_PLAN",
+                        "id": "#new",
+                        "subscription_plan_data": {"name": "Pro", "phases": []},
+                    }
+                }
+            )
+            args, kwargs = mock_req.call_args
+            assert "/v2/catalog/object" in args[1]
+            assert "idempotency_key" in kwargs["json"]
+
+
+class TestInvoicesClient:
+    @pytest.mark.asyncio
+    async def test_search_invoices(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(200, json={"invoices": []}, request=httpx.Request("POST", "https://test"))
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.search_invoices({"query": {"filter": {"location_ids": ["L1"]}}, "limit": 5})
+            args, kwargs = mock_req.call_args
+            assert args[0] == "POST"
+            assert "/v2/invoices/search" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_get_invoice(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"invoice": {"id": "inv_1"}}, request=httpx.Request("GET", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.get_invoice("inv_1")
+            args, _ = mock_req.call_args
+            assert "/v2/invoices/inv_1" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_create_invoice_auto_idempotency(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"invoice": {"id": "inv_1"}}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.create_invoice({"invoice": {"order_id": "ord_x"}})
+            _, kwargs = mock_req.call_args
+            assert "idempotency_key" in kwargs["json"]
+
+    @pytest.mark.asyncio
+    async def test_publish_invoice(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"invoice": {"id": "inv_1", "status": "UNPAID"}}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.publish_invoice("inv_1", {"version": 0})
+            args, kwargs = mock_req.call_args
+            assert "/v2/invoices/inv_1/publish" in args[1]
+            assert kwargs["json"]["version"] == 0
+            assert "idempotency_key" in kwargs["json"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_invoice(self, client: SquareClient) -> None:
+        mock_response = httpx.Response(
+            200, json={"invoice": {"id": "inv_1", "status": "CANCELED"}}, request=httpx.Request("POST", "https://test")
+        )
+        with patch.object(client._http, "request", new_callable=AsyncMock, return_value=mock_response) as mock_req:
+            await client.cancel_invoice("inv_1", {"version": 1})
+            args, kwargs = mock_req.call_args
+            assert "/v2/invoices/inv_1/cancel" in args[1]
+            assert kwargs["json"]["version"] == 1
+
+
 class TestWebhookVerification:
     def _sign(self, body: str, secret: str, url: str) -> str:
         digest = hmac.new((secret).encode(), (url + body).encode(), hashlib.sha256).digest()

@@ -132,6 +132,58 @@ SAMPLE_DISPUTE: dict[str, Any] = {
     "due_at": "2026-04-01T00:00:00Z",
 }
 
+SAMPLE_SUBSCRIPTION: dict[str, Any] = {
+    "id": "sub_xyz",
+    "location_id": "L1A2B3C4D5",
+    "customer_id": "cust_abc",
+    "plan_variation_id": "plan_var_pro",
+    "status": "ACTIVE",
+    "start_date": "2026-04-01",
+    "charged_through_date": "2026-04-30",
+    "invoice_ids": ["inv_1", "inv_2"],
+    "version": 7,
+    "timezone": "America/Los_Angeles",
+    "actions": [{"type": "PAUSE", "effective_date": "2026-05-01"}],
+    "created_at": "2026-04-01T00:00:00Z",
+}
+
+SAMPLE_SUBSCRIPTION_PLAN: dict[str, Any] = {
+    "id": "plan_pro",
+    "type": "SUBSCRIPTION_PLAN",
+    "subscription_plan_data": {
+        "name": "Pro Plan",
+        "phases": [
+            {"cadence": "MONTHLY", "recurring_price_money": {"amount": 2900, "currency": "USD"}},
+        ],
+    },
+    "updated_at": "2026-03-01T00:00:00Z",
+}
+
+SAMPLE_INVOICE: dict[str, Any] = {
+    "id": "inv_1",
+    "version": 1,
+    "status": "DRAFT",
+    "invoice_number": "INV-001",
+    "title": "April Subscription",
+    "order_id": "ord_inv_1",
+    "location_id": "L1A2B3C4D5",
+    "primary_recipient": {
+        "customer_id": "cust_abc",
+        "email_address": "alice@example.com",
+    },
+    "payment_requests": [
+        {
+            "request_type": "BALANCE",
+            "computed_amount_money": {"amount": 2900, "currency": "USD"},
+            "due_date": "2026-04-15",
+        }
+    ],
+    "delivery_method": "EMAIL",
+    "public_url": "https://invoice.square.com/inv/inv_1",
+    "created_at": "2026-04-01T00:00:00Z",
+    "updated_at": "2026-04-01T00:00:00Z",
+}
+
 SAMPLE_WEBHOOK_SUB: dict[str, Any] = {
     "id": "wbhk_xyz",
     "name": "All payments",
