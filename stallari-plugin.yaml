@@ -1,0 +1,143 @@
+name: square-blade-mcp
+version: "0.1.0"
+description: "Square Payments API operations — payments, refunds, customers, cards, locations, orders, catalog, inventory, disputes, webhooks. Token-efficient with pipe-delimited output, field selection, and human-readable money formatting. PCI-safe card output."
+author: groupthink-dev
+license: MIT
+tier: certified
+author_type: first-party
+readiness: beta
+homepage: https://github.com/Groupthink-dev/square-blade-mcp
+contract: payments-v1
+
+services:
+  payments:
+    # Meta
+    info: square_info
+    # Payments
+    payment_list: square_payments
+    payment_get: square_payment
+    payment_create: square_create_payment
+    payment_cancel: square_cancel_payment
+    payment_complete: square_complete_payment
+    # Refunds
+    refund_list: square_refunds
+    refund_get: square_refund
+    refund_create: square_create_refund
+    # Customers
+    customer_list: square_customers
+    customer_search: square_search_customers
+    customer_get: square_customer
+    customer_create: square_create_customer
+    customer_update: square_update_customer
+    customer_delete: square_delete_customer
+    # Cards on file
+    card_list: square_cards
+    card_get: square_card
+    card_create: square_create_card
+    card_disable: square_disable_card
+    # Locations
+    location_list: square_locations
+    location_get: square_location
+    # Orders
+    order_create: square_create_order
+    order_get: square_order
+    order_list: square_search_orders
+    order_update: square_update_order
+    order_pay: square_pay_order
+    # Catalog
+    catalog_list: square_catalog
+    catalog_get: square_catalog_object
+    # Inventory
+    inventory_count: square_inventory
+    # Disputes
+    dispute_list: square_disputes
+    dispute_get: square_dispute
+    # Webhooks
+    webhook_subscription_list: square_webhook_subscriptions
+    webhook_subscription_create: square_create_webhook_subscription
+    webhook_subscription_delete: square_delete_webhook_subscription
+    webhook_event_types: square_webhook_event_types
+    webhook_verify: square_verify_webhook
+
+# Operations declared in payments-v1 but not yet implemented in this server.
+# Surfaced here so the catalog can advertise the gap. Tracked in README roadmap.
+not_supported:
+  - card_delete         # use card_disable (soft delete)
+  - payment_void        # gated, deferred to v0.2.0
+  - refund_unlinked     # gated, deferred to v0.2.0
+  - inventory_adjust    # gated, deferred to v0.2.0
+
+setup:
+  auth_model: api_key   # PAT for v0.1.0; OAuth in v0.2.0
+  complexity: moderate
+  icon: "square.fill"
+  product: "Square Payments"
+  blurb: "Connect to Square for in-person and online payments — POS, e-commerce, refunds, customer cards on file."
+  fields:
+    - key: SQUARE_ACCESS_TOKEN
+      label: "Access Token (PAT)"
+      secret: true
+      required: true
+      placeholder: "EAAA..."
+      help: "Square personal access token from Developer Dashboard. Use a sandbox token for testing."
+    - key: SQUARE_ENVIRONMENT
+      label: "Environment"
+      secret: false
+      required: true
+      placeholder: "sandbox or production"
+      help: "Must be sandbox or production. Fail-closed on invalid values."
+    - key: SQUARE_WEBHOOK_SIGNATURE_KEY
+      label: "Webhook Signature Key"
+      secret: true
+      required: false
+      placeholder: "Optional — required only if verifying inbound webhooks"
+      help: "From the Square webhook subscription settings. Used by square_verify_webhook."
+  test:
+    endpoint: "https://connect.squareupsandbox.com/v2/locations"
+    auth_style: bearer
+    auth_header: "Authorization"
+  help:
+    - label: "Square Developer Docs"
+      url: "https://developer.squareup.com/docs"
+    - label: "Create Access Token (Sandbox)"
+      url: "https://developer.squareup.com/apps"
+
+install:
+  runtime: uv
+  package: square-blade-mcp
+
+env:
+  - name: SQUARE_ACCESS_TOKEN
+    description: "Square access token (EAAA*)"
+    secret: true
+  - name: SQUARE_ENVIRONMENT
+    description: "sandbox or production (mandatory)"
+    secret: false
+  - name: SQUARE_WRITE_ENABLED
+    description: "Enable write operations (create/update/cancel/delete)"
+    default: "false"
+  - name: SQUARE_WEBHOOK_SIGNATURE_KEY
+    description: "Signing key for webhook HMAC verification"
+    secret: true
+  - name: SQUARE_MCP_TRANSPORT
+    description: "Transport mode: stdio (default) or http"
+    default: "stdio"
+  - name: SQUARE_MCP_HOST
+    description: "HTTP transport bind host"
+    default: "127.0.0.1"
+  - name: SQUARE_MCP_PORT
+    description: "HTTP transport bind port"
+    default: "8770"
+  - name: SQUARE_MCP_API_TOKEN
+    description: "Bearer token for HTTP transport auth"
+    secret: true
+
+requires:
+  stallari: ">=0.60"
+
+conformance:
+  required: "12/12"
+  recommended: "8/8"
+  optional: "10/10"
+  gated: "2/6"
+  last_tested: "2026-04-27"
