@@ -196,6 +196,9 @@ env:
 requires:
   stallari: ">=0.60"
 
+  adapter_contracts:
+    - "billing >= 1.0"
+    - "payments >= 1.0"
 conformance:
   payments-v1:
     required: "12/12"
